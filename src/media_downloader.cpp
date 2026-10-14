@@ -76,42 +76,8 @@ DownloadResult downloadFullVideo(
                     percent = std::min(100.0, (static_cast<double>(currentBytes) / static_cast<double>(totalBytes)) * 100.0);
                 }
 
-                const int barWidth = 20;
-                int filled = std::min(barWidth, static_cast<int>(std::round((percent / 100.0) * barWidth)));
-                std::string bar = "";
-                for (int i = 0; i < filled; ++i) bar += "█";
-                for (int i = filled; i < barWidth; ++i) bar += "░";
-
-                std::string currentSizeStr = Utils::formatBytes(currentBytes);
-                std::string totalSizeStr = (totalBytes > 0) ? Utils::formatBytes(totalBytes) : "? MB";
-
-                std::string speedStr = Utils::formatBytes(static_cast<uint64_t>(speedBps)) + "/s";
-                double mbps = (speedBps * 8.0) / (1000.0 * 1000.0);
-                std::ostringstream mbpsSs;
-                mbpsSs << std::fixed << std::setprecision(1) << mbps << " Mbps";
-
-                std::string etaStr = "";
-                if (percent > 0.0 && percent < 100.0 && speedBps > 1000.0) {
-                    uint64_t remainBytes = totalBytes - currentBytes;
-                    uint64_t remainSec = static_cast<uint64_t>(std::round(static_cast<double>(remainBytes) / speedBps));
-                    uint64_t m = remainSec / 60;
-                    uint64_t s = remainSec % 60;
-                    std::ostringstream etaSs;
-                    etaSs << " | " << Colors::BrightCyan << "Kalan: " << Colors::Reset
-                          << std::setw(2) << std::setfill('0') << m << ":"
-                          << std::setw(2) << std::setfill('0') << s;
-                    etaStr = etaSs.str();
-                }
-
-                std::ostringstream status;
-                status << "\r" << Colors::Cyan << "[Dogrudan Indiriliyor]" << Colors::Reset
-                       << " [" << Colors::Green << bar << Colors::Reset << "] "
-                       << Colors::BrightGreen << std::setw(5) << std::fixed << std::setprecision(1) << percent << "%" << Colors::Reset
-                       << " | " << Colors::BrightWhite << currentSizeStr << " / " << totalSizeStr << Colors::Reset
-                       << " | " << Colors::BrightYellow << "Hiz: " << speedStr << " (" << mbpsSs.str() << ")" << Colors::Reset
-                       << etaStr << "   ";
-
-                std::cout << status.str() << std::flush;
+                std::string line = Utils::buildProgressLine("Dogrudan Indiriliyor", percent, currentBytes, totalBytes, speedBps);
+                std::cout << line << std::flush;
             }
             return true;
         };
@@ -125,8 +91,8 @@ DownloadResult downloadFullVideo(
             progressCallback
         );
 
-        // Satırı temizle
-        std::cout << "\r" << std::string(110, ' ') << "\r" << std::flush;
+        // Satiri temizle
+        std::cout << "\r\033[2K" << std::flush;
 
         if (ok) {
             if (fs::exists(outputPath)) fs::remove(outputPath);

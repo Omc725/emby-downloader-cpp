@@ -22,4 +22,14 @@ namespace Utils {
     std::string toLower(const std::string& s);
     std::string urlEncode(const std::string& value);
     bool checkFfmpegInstalled();
+    int getTerminalWidth();
+    std::string buildProgressLine(
+        const std::string& tag,
+        double percent,
+        uint64_t currentBytes,
+        uint64_t totalBytes,
+        double speedBps,
+        const std::string& extraSpeedInfo = "",
+        int forcedWidth = 0
+    );
 }

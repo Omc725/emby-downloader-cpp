@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 namespace Utils {
 
@@ -242,6 +243,151 @@ std::string askPassword(const std::string& prompt) {
 
 bool checkFfmpegInstalled() {
     return (std::system("ffmpeg -version > /dev/null 2>&1") == 0);
+}
+
+int getTerminalWidth() {
+    struct winsize w;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_col > 0) {
+        return static_cast<int>(w.ws_col);
+    }
+    const char* cols = std::getenv("COLUMNS");
+    if (cols) {
+        try {
+            int c = std::stoi(cols);
+            if (c > 0) return c;
+        } catch (...) {}
+    }
+    return 80;
+}
+
+std::string buildProgressLine(
+    const std::string& tag,
+    double percent,
+    uint64_t currentBytes,
+    uint64_t totalBytes,
+    double speedBps,
+    const std::string& extraSpeedInfo,
+    int forcedWidth
+) {
+    int termWidth = (forcedWidth > 0) ? forcedWidth : getTerminalWidth();
+    int maxCols = std::max(30, termWidth - 1);
+
+    std::string currentSizeStr = formatBytes(currentBytes);
+    std::string totalSizeStr = (totalBytes > 0) ? formatBytes(totalBytes) : "? MB";
+
+    std::ostringstream pss;
+    pss << std::fixed << std::setprecision(1) << percent << "%";
+    std::string percentStr = pss.str();
+
+    std::string speedFull;
+    std::string speedCompact;
+    if (!extraSpeedInfo.empty()) {
+        speedFull = "Hiz: " + extraSpeedInfo + " (" + formatBytes(static_cast<uint64_t>(speedBps)) + "/s)";
+        speedCompact = "Hiz: " + extraSpeedInfo;
+    } else {
+        double mbps = (speedBps * 8.0) / (1000.0 * 1000.0);
+        std::ostringstream mbpsSs;
+        mbpsSs << std::fixed << std::setprecision(1) << mbps << " Mbps";
+        speedFull = "Hiz: " + formatBytes(static_cast<uint64_t>(speedBps)) + "/s (" + mbpsSs.str() + ")";
+        speedCompact = "Hiz: " + formatBytes(static_cast<uint64_t>(speedBps)) + "/s";
+    }
+
+    std::string etaStr = "";
+    if (percent > 0.0 && percent < 100.0 && speedBps > 1000.0 && totalBytes > currentBytes) {
+        uint64_t remainBytes = totalBytes - currentBytes;
+        uint64_t remainSec = static_cast<uint64_t>(std::round(static_cast<double>(remainBytes) / speedBps));
+        uint64_t m = remainSec / 60;
+        uint64_t s = remainSec % 60;
+        std::ostringstream etaSs;
+        etaSs << "Kalan: " << std::setw(2) << std::setfill('0') << m << ":"
+              << std::setw(2) << std::setfill('0') << s;
+        etaStr = etaSs.str();
+    }
+
+    std::string tagFull = tag;
+    std::string tagShort = (tag == "Dogrudan Indiriliyor") ? "Indiriliyor" : 
+                           ((tag == "Ses Cikariliyor (Kopyalama)") ? "Ses Cikariliyor" : tag);
+
+    std::string sizeFull = currentSizeStr + " / " + totalSizeStr;
+    std::string sizeCompact = currentSizeStr;
+
+    auto measureLen = [&](bool showT, bool shortT, int barW, bool showE, bool shortSpd, bool shortSz) {
+        int len = 0;
+        if (showT) {
+            len += (shortT ? tagShort.length() : tagFull.length()) + 3; // "[Tag] "
+        }
+        if (barW > 0) {
+            len += barW + 3; // "[Bar] "
+        }
+        len += percentStr.length();
+        len += 3 + (shortSz ? sizeCompact.length() : sizeFull.length());
+        len += 3 + (shortSpd ? speedCompact.length() : speedFull.length());
+        if (showE && !etaStr.empty()) {
+            len += 3 + etaStr.length();
+        }
+        return len;
+    };
+
+    bool showTag = true;
+    bool shortTag = false;
+    bool showEta = !etaStr.empty();
+    bool shortSpeed = false;
+    bool shortSize = false;
+    int barWidth = 20;
+
+    // Kademeli adaptif daraltma
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        barWidth = 12;
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        shortSpeed = true; // Hizdaki Mbps bilgisini kaldir
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        barWidth = 8;
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        showEta = false; // Kalan sureyi cikar
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        shortTag = true; // Etiketi kisalt
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        barWidth = 0; // Cubugu kaldir
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        shortSize = true; // Sadece indirilen boyutu goster
+    }
+    if (measureLen(showTag, shortTag, barWidth, showEta, shortSpeed, shortSize) > maxCols) {
+        showTag = false; // Etiketi tamamen kaldir
+    }
+
+    std::string barStr = "";
+    if (barWidth > 0) {
+        int filled = std::clamp(static_cast<int>(std::round((percent / 100.0) * barWidth)), 0, barWidth);
+        std::string filledStr = "";
+        for (int i = 0; i < filled; ++i) filledStr += "█";
+        std::string emptyStr = "";
+        for (int i = filled; i < barWidth; ++i) emptyStr += "░";
+        barStr = "[" + Colors::Green + filledStr + Colors::Reset + emptyStr + "] ";
+    }
+
+    std::ostringstream out;
+    out << "\r";
+    if (showTag) {
+        out << Colors::Cyan << "[" << (shortTag ? tagShort : tagFull) << "]" << Colors::Reset << " ";
+    }
+    if (barWidth > 0) {
+        out << barStr;
+    }
+    out << Colors::BrightGreen << percentStr << Colors::Reset << " | ";
+    out << Colors::BrightWhite << (shortSize ? sizeCompact : sizeFull) << Colors::Reset << " | ";
+    out << Colors::BrightYellow << (shortSpeed ? speedCompact : speedFull) << Colors::Reset;
+    if (showEta && !etaStr.empty()) {
+        out << " | " << Colors::BrightCyan << etaStr << Colors::Reset;
+    }
+
+    out << "\033[K";
+    return out.str();
 }
 
 }
